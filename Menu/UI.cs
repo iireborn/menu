@@ -189,14 +189,13 @@ namespace iiMenu.Menu
         private List<Image> imageObjects = new List<Image>();
 
         private float uiUpdateDelay;
-        private float legacyPanelCheckTime;
+        private float roomTickTime;
 
         private void Update()
         {
-            if (Time.time >= legacyPanelCheckTime)
+            if (Time.time >= roomTickTime)
             {
-                legacyPanelCheckTime = Time.time + 1f;
-                HideLegacyLtsPanel();
+                roomTickTime = Time.time + 1f;
                 Managers.IiServersManager.TickRoom();
             }
 
