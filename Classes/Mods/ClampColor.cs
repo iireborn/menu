@@ -23,16 +23,29 @@ namespace iiMenu.Classes.Mods
 
         public void Update()
         {
-            if (gameObjectRenderer.material.shader != targetRenderer.material.shader)
-                gameObjectRenderer.material = new Material(targetRenderer.material.shader);
+            // Both renderers' .material are native property accesses and this runs every
+            // frame on every ClampColor, so hold the references and only write on change.
+            if (ownMaterial == null)
+                ownMaterial = gameObjectRenderer.material;
 
-            if (targetRenderer.material.mainTexture != null && gameObjectRenderer.material.mainTexture != targetRenderer.material.mainTexture)
-                gameObjectRenderer.material.mainTexture = targetRenderer.material.mainTexture;
+            Material targetMaterial = targetRenderer.material;
 
-            gameObjectRenderer.material.color = targetRenderer.material.color;
+            if (ownMaterial.shader != targetMaterial.shader)
+            {
+                ownMaterial = new Material(targetMaterial.shader);
+                gameObjectRenderer.material = ownMaterial;
+            }
+
+            if (targetMaterial.mainTexture != null && ownMaterial.mainTexture != targetMaterial.mainTexture)
+                ownMaterial.mainTexture = targetMaterial.mainTexture;
+
+            if (ownMaterial.color != targetMaterial.color)
+                ownMaterial.color = targetMaterial.color;
         }
 
         public Renderer gameObjectRenderer;
         public Renderer targetRenderer;
+
+        private Material ownMaterial;
     }
 }

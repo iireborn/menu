@@ -41,35 +41,64 @@ namespace iiMenu.Classes.Menu
             if (colors.transparent)
                 return;
 
-            if (!Main.dynamicGradients)
-                targetRenderer.material.color = colors.GetCurrentColor();
-            else
-            {
-                if (colors.IsFlat())
-                    targetRenderer.material.color = colors.GetColor(0);
-                else
-                {
-                    if (targetRenderer.material.shader.name != "Universal Render Pipeline/Unlit" && targetRenderer.material.mainTexture == null)
-                    {
-                        targetRenderer.material = new Material(Shader.Find("Universal Render Pipeline/Unlit"))
-                        {
-                            mainTexture = Main.GetGradientTexture(colors.GetColor(0), colors.GetColor(1))
-                        };
+            // Renderer.material is a native property access, and this Update runs on
+            // every ColorChanger every frame, so the material reference is held onto
+            // instead of being re-fetched, and colour is only written when it differs.
+            Material material = cachedMaterial;
 
-                        if (Main.scrollingGradients)
-                            gameObject.GetOrAddComponent<ScrollMaterial>();
-                    }
+            if (material == null)
+            {
+                material = targetRenderer.material;
+                cachedMaterial = material;
+            }
+
+            if (!Main.dynamicGradients)
+            {
+                Color color = colors.GetCurrentColor();
+
+                if (material.color != color)
+                    material.color = color;
+            }
+            else if (colors.IsFlat())
+            {
+                Color color = colors.GetColor(0);
+
+                if (material.color != color)
+                    material.color = color;
+            }
+            else if (!gradientMaterialReady)
+            {
+                if (material.shader.name != "Universal Render Pipeline/Unlit" && material.mainTexture == null)
+                {
+                    material = new Material(Shader.Find("Universal Render Pipeline/Unlit"))
+                    {
+                        mainTexture = Main.GetGradientTexture(colors.GetColor(0), colors.GetColor(1))
+                    };
+
+                    targetRenderer.material = material;
+                    cachedMaterial = material;
+
+                    if (Main.scrollingGradients)
+                        gameObject.GetOrAddComponent<ScrollMaterial>();
                 }
+
+                gradientMaterialReady = true;
             }
 
             if (!Main.transparentMenu) return;
-            Color color = targetRenderer.material.color;
-            color.a = 0.5f;
-            targetRenderer.material.color = color;
+
+            Color faded = material.color;
+            faded.a = 0.5f;
+
+            if (material.color != faded)
+                material.color = faded;
         }
 
         public Renderer targetRenderer;
         public ExtGradient colors;
         public bool? overrideTransparency;
+
+        private Material cachedMaterial;
+        private bool gradientMaterialReady;
     }
 }

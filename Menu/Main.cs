@@ -1329,10 +1329,21 @@ namespace iiMenu.Menu
                 PluginManager.ExecuteUpdate();
 
                 // Menu
-                foreach (ButtonInfo button in Buttons.buttons
-                    .SelectMany(list => list)
-                    .Where(button => button.enabled && (button.method != null || button.postMethod != null)))
+                // Written as a plain nested loop rather than SelectMany().Where(): this
+                // runs every frame over every button in the menu, and the LINQ form
+                // allocated two iterators plus a closure each frame. A hand-rolled guard
+                // also keeps the inner body below untouched.
+                for (int buttonListIndex = 0; buttonListIndex < Buttons.buttons.Length; buttonListIndex++)
                 {
+                    ButtonInfo[] buttonList = Buttons.buttons[buttonListIndex];
+
+                    for (int buttonIndex = 0; buttonIndex < buttonList.Length; buttonIndex++)
+                    {
+                        ButtonInfo button = buttonList[buttonIndex];
+
+                        if (!button.enabled || (button.method == null && button.postMethod == null))
+                            continue;
+
                     try
                     {
                         bool _leftPrimary = leftPrimary;
@@ -1444,6 +1455,7 @@ namespace iiMenu.Menu
                         leftJoystickClick = _leftJoystickClick;
                         rightJoystickClick = _rightJoystickClick;
                     } catch { }
+                    }
                 }
                 #endregion
             }

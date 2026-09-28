@@ -117,9 +117,28 @@ namespace iiMenu.Classes.Menu
         public Color GetCurrentColor(float offset = 0f) =>
             GetColorTime((offset + Time.time / (Main.slowFadeColors ? 10f : 2f)) % 1f);
 
-        public bool IsFlat() =>
-            !rainbow && !pastelRainbow && !epileptic && !copyRigColor &&
-            colors.Length > 0 && colors.All(key => key.color == colors[0].color);
+        // This ran on every ColorChanger every frame, and the LINQ form allocated a
+        // capturing closure plus an enumerator each call. A plain loop is equivalent.
+        public bool IsFlat()
+        {
+            if (rainbow || pastelRainbow || epileptic || copyRigColor)
+                return false;
+
+            int count = colors.Length;
+
+            if (count <= 0)
+                return false;
+
+            Color first = colors[0].color;
+
+            for (int i = 1; i < count; i++)
+            {
+                if (colors[i].color != first)
+                    return false;
+            }
+
+            return true;
+        }
 
         public ExtGradient Clone()
         {
