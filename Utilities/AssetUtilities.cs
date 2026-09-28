@@ -53,28 +53,76 @@ namespace iiMenu.Utilities
 
         public const string BrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
+        private static readonly HashSet<string> soundsLoading = new HashSet<string>();
+
         public static AudioClip LoadSoundFromFile(string fileName) // Thanks to ShibaGT for help with loading the audio from file
         {
-            AudioClip sound;
-            if (!audioFilePool.TryGetValue(fileName, out var value))
+            if (audioFilePool.TryGetValue(fileName, out var cached))
+                return cached;
+
+            // This used to spin on 'while (!newvar.isDone) { }', which froze the main
+            // thread for the whole decode. It was also a deadlock hazard: Unity pumps
+            // UnityWebRequestAsyncOperation on the main thread, so the thread being
+            // spun was the thread that had to advance the request. The load now runs as
+            // a coroutine and this returns null for the first call, which every caller
+            // already handles (LoadSoundFromURL returns null while downloading too).
+            lock (soundsLoading)
+            {
+                if (!soundsLoading.Add(fileName))
+                    return null;
+            }
+
+            CoroutineManager.instance?.StartCoroutine(LoadSoundFromFileAsync(fileName));
+
+            return null;
+        }
+
+        private static System.Collections.IEnumerator LoadSoundFromFileAsync(string fileName)
+        {
+            try
             {
                 string filePath = $"{GetGamePath()}/{PluginInfo.BaseDirectory}/{fileName}";
 
-                using (UnityWebRequest actualrequest = UnityWebRequestMultimedia.GetAudioClip($"file://{filePath}", GetAudioType(GetFileExtension(fileName))))
+                UnityWebRequest request = null;
+
+                // Kept outside the yield so the iterator does not sit in a try/catch,
+                // which C# does not allow.
+                try
                 {
-                    UnityWebRequestAsyncOperation newvar = actualrequest.SendWebRequest();
-                    while (!newvar.isDone) { }
-                    AudioClip actualclip = DownloadHandlerAudioClip.GetContent(actualrequest);
-                    sound = Task.FromResult(actualclip).Result;
-                    actualrequest.Dispose();
+                    request = UnityWebRequestMultimedia.GetAudioClip($"file://{filePath}", GetAudioType(GetFileExtension(fileName)));
+                }
+                catch (System.Exception exception)
+                {
+                    LogManager.LogError($"Failed to load sound {fileName}: {exception.Message}");
                 }
 
-                audioFilePool.Add(fileName, sound);
-            }
-            else
-                sound = value;
+                if (request == null)
+                    yield break;
 
-            return sound;
+                using (request)
+                {
+                    yield return request.SendWebRequest();
+
+                    try
+                    {
+                        AudioClip clip = request.result == UnityWebRequest.Result.Success
+                            ? DownloadHandlerAudioClip.GetContent(request)
+                            : null;
+
+                        if (clip != null)
+                            audioFilePool[fileName] = clip;
+                    }
+                    catch (System.Exception exception)
+                    {
+                        LogManager.LogError($"Failed to decode sound {fileName}: {exception.Message}");
+                    }
+                }
+            }
+            finally
+            {
+                lock (soundsLoading)
+                    soundsLoading.Remove(fileName);
+            }
         }
 
         private static readonly HashSet<string> soundsDownloading = new HashSet<string>();

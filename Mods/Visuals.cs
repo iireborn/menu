@@ -44,6 +44,38 @@ namespace iiMenu.Mods
 {
     public class Visuals
     {
+        private sealed class MeasuredWidth
+        {
+            public string Source;
+            public float Width;
+        }
+
+        // GetPreferredValues forces TextMeshPro to generate and measure glyphs, which is
+        // one of the most expensive calls available to us. Nametags, tags and scoreboard
+        // lines all need a width every frame to size their background quads, but the width
+        // only changes when the text does. Cache it per component and only re-measure when
+        // the source string actually changes. A ConditionalWeakTable is used so entries
+        // disappear with the component instead of leaking as rigs are destroyed.
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TMP_Text, MeasuredWidth> measuredWidths =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<TMP_Text, MeasuredWidth>();
+
+        private static float MeasuredPreferredWidth(TMP_Text text, string source, bool stripTags)
+        {
+            if (text == null)
+                return 0f;
+
+            if (measuredWidths.TryGetValue(text, out MeasuredWidth cached) && cached != null && cached.Source == source)
+                return cached.Width;
+
+            string measured = stripTags ? Main.NoRichtextTags(source) : source;
+            float width = text.GetPreferredValues(measured).x;
+
+            measuredWidths.Remove(text);
+            measuredWidths.Add(text, new MeasuredWidth { Source = source, Width = width });
+
+            return width;
+        }
+
         private static Shader GetVisualShader()
         {
             return Shader.Find("GUI/Text Shader") ?? Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Sprites/Default");
@@ -3098,8 +3130,7 @@ namespace iiMenu.Mods
                         TextMeshPro tm = infoTextTr.GetComponent<TextMeshPro>();
                         if (nameTagChams)
                             tm.Chams();
-                        string plainText = System.Text.RegularExpressions.Regex.Replace(tagText, "<.*?>", string.Empty);
-                        float textWidth = tm.GetPreferredValues(plainText).x * 0.65f;
+                        float textWidth = MeasuredPreferredWidth(tm, tagText, true) * 0.65f;
                         float bgHeight = textWidth + 0.15f;
 
                         // nametag part inherits the player color
@@ -3116,7 +3147,7 @@ namespace iiMenu.Mods
                             nameTm.Chams();
                         nameTm.color = vrrig.playerColor;
                         
-                        float nameTextWidth = nameTm.GetPreferredValues(playerName).x * 0.5f;
+                        float nameTextWidth = MeasuredPreferredWidth(nameTm, playerName, false) * 0.5f;
                         float nameBgHeight = nameTextWidth + 0.2f;
 
                         Color nameBgColor = DarkenColor(vrrig.playerColor);
@@ -3228,12 +3259,15 @@ namespace iiMenu.Mods
                 if (nameTagChams)
                     tmp.Chams();
 
-                Vector2 size = tmp.textBounds.size;
+                // textBounds forces the glyph mesh to be generated, so read it once
+                // instead of twice per rig per frame.
+                Bounds bounds = tmp.textBounds;
+                Vector2 size = bounds.size;
                 float paddingX = 0.1f;
                 float paddingY = 0.03f;
 
                 bg.transform.localScale = new Vector3(size.x + paddingX, size.y + paddingY, 1f);
-                bg.transform.localPosition = new Vector3(tmp.textBounds.center.x, tmp.textBounds.center.y, 0.01f);
+                bg.transform.localPosition = new Vector3(bounds.center.x, bounds.center.y, 0.01f);
 
                 container.transform.localScale = new Vector3(0.3f, 0.3f, 0.3f) * vrrig.scaleFactor;
 
@@ -4527,6 +4561,12 @@ namespace iiMenu.Mods
             public MeshFilter meshFilter;
             public MeshRenderer meshRenderer;
             public GameObject wireframeObj;
+
+            // Reused across bakes so the every-3-frames pass stops allocating.
+            private readonly List<Vector3> bakedLineVertices = new List<Vector3>();
+            private readonly List<int> bakedLineIndices = new List<int>();
+            private Mesh bakedMesh;
+
             public Color Color
             {
                 get => meshRenderer.material.color;
@@ -4556,14 +4596,24 @@ namespace iiMenu.Mods
                 if (Time.frameCount % 3 > 0)
                     return;
 
-                Mesh bakedMesh = new Mesh();
-                skinnedMeshRenderer.BakeMesh(bakedMesh);
+                // BakeMesh writes into a native Mesh. Allocating a fresh one on every
+                // pass leaked native memory continuously, so bake into a reusable mesh
+                // instead. vertexBuffer/reuseMesh keep the data on the CPU, which is
+                // required to read vertices back out on the following line.
+                if (bakedMesh == null)
+                    bakedMesh = new Mesh();
+
+                skinnedMeshRenderer.BakeMesh(bakedMesh, true);
+                bakedMesh.MarkDynamic();
 
                 Vector3[] vertices = bakedMesh.vertices;
                 int[] triangles = bakedMesh.triangles;
 
-                List<Vector3> lineVertices = new List<Vector3>();
-                List<int> lineIndices = new List<int>();
+                List<Vector3> lineVertices = bakedLineVertices;
+                List<int> lineIndices = bakedLineIndices;
+
+                lineVertices.Clear();
+                lineIndices.Clear();
 
                 for (int i = 0; i < triangles.Length; i += 3)
                 {
@@ -4592,6 +4642,12 @@ namespace iiMenu.Mods
 
             void OnDestroy()
             {
+                if (bakedMesh != null)
+                {
+                    Destroy(bakedMesh);
+                    bakedMesh = null;
+                }
+
                 if (lineMesh != null)
                 {
                     Destroy(lineMesh);

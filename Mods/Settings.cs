@@ -6299,29 +6299,36 @@ exit 0";
         {
             string seperator = ";;";
 
-            string enabledtext = "";
+            // These used to be built with 'x += ...' inside a loop over every button in
+            // the menu, which reallocates and recopies the whole buffer on each step.
+            // With ~800 buttons that is quadratic and it ran on the 60 second autosave.
+            System.Text.StringBuilder enabledBuilder = new System.Text.StringBuilder();
+            System.Text.StringBuilder favoriteBuilder = new System.Text.StringBuilder();
+
             foreach (ButtonInfo[] buttonlist in Buttons.buttons)
             {
                 foreach (ButtonInfo v in buttonlist)
                 {
                     if (!v.detected && v.enabled && v.buttonText != "Save Preferences")
                     {
-                        if (enabledtext == "")
-                            enabledtext += v.buttonText;
-                        else
-                            enabledtext += seperator + v.buttonText;
+                        if (enabledBuilder.Length > 0)
+                            enabledBuilder.Append(seperator);
+
+                        enabledBuilder.Append(v.buttonText);
                     }
                 }
             }
 
-            string favoritetext = "";
             foreach (string fav in favorites)
             {
-                if (favoritetext == "")
-                    favoritetext += fav;
-                else
-                    favoritetext += seperator + fav;
+                if (favoriteBuilder.Length > 0)
+                    favoriteBuilder.Append(seperator);
+
+                favoriteBuilder.Append(fav);
             }
+
+            string enabledtext = enabledBuilder.ToString();
+            string favoritetext = favoriteBuilder.ToString();
 
             string[] settings = {
                 Movement.platformMode.ToString(),
