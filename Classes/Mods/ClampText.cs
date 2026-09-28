@@ -19,8 +19,14 @@ namespace iiMenu.Classes.Mods
             LateUpdate();
         }
 
-        public void LateUpdate() =>
-            currentText.text = targetText.text;
+        public void LateUpdate()
+        {
+            if (currentText == null || targetText == null)
+                return;
+
+            if (currentText.text != targetText.text)
+                currentText.text = targetText.text;
+        }
 
         public Text currentText;
         public Text targetText;

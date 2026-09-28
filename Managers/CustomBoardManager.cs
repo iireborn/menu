@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ii Reborn
  * Portions Copyright (C) 2025–2026 Goldentrophy Software
  * Licensed under GNU GPL v3.0-or-later — see LICENSE and NOTICE.
@@ -43,6 +43,7 @@ namespace iiMenu.Managers
             foreach (ScreenTarget target in screenTargets.Values)
                 RemoveScreenOverlay(target);
             screenTargets.Clear();
+            screenTargetsDirty = true;
             if (ownsBoardMaterial && _boardMaterial != null)
             {
                 Destroy(_boardMaterial);
@@ -468,22 +469,36 @@ namespace iiMenu.Managers
                 bool tintBoardText = CustomBoardsEnabled && CustomBoardTextEnabled;
                 Color targetColor = textColors[0].GetCurrentColor();
 
-                textMeshPro.RemoveAll(t => t == null);
-                var deadKeys = characterDistanceArchive.Keys.Where(k => k == null).ToList();
-                foreach (var k in deadKeys) characterDistanceArchive.Remove(k);
-                var deadColorKeys = textColorArchive.Keys.Where(k => k == null).ToList();
-                foreach (var k in deadColorKeys) textColorArchive.Remove(k);
-
-                foreach (TextMeshPro txt in textMeshPro.Where(text => text.isActiveAndEnabled))
+                // Dropping destroyed references is pure cleanup, so it runs on a slow
+                // cadence instead of every frame. Doing it per frame meant three LINQ
+                // chains (and their garbage) on every single frame.
+                if (Time.time >= nextArchivePruneTime)
                 {
+                    nextArchivePruneTime = Time.time + 1f;
+
+                    textMeshPro.RemoveAll(t => t == null);
+                    var deadKeys = characterDistanceArchive.Keys.Where(k => k == null).ToList();
+                    foreach (var k in deadKeys) characterDistanceArchive.Remove(k);
+                    var deadColorKeys = textColorArchive.Keys.Where(k => k == null).ToList();
+                    foreach (var k in deadColorKeys) textColorArchive.Remove(k);
+                }
+
+                for (int i = textMeshPro.Count - 1; i >= 0; i--)
+                {
+                    TextMeshPro txt = textMeshPro[i];
+
+                    if (txt == null || !txt.isActiveAndEnabled)
+                        continue;
+
                     if (tintBoardText)
                     {
                         if (!textColorArchive.ContainsKey(txt))
                             textColorArchive[txt] = txt.color;
 
-                        txt.color = targetColor;
+                        if (txt.color != targetColor)
+                            txt.color = targetColor;
                     }
-                    else if (textColorArchive.TryGetValue(txt, out Color archivedColor))
+                    else if (textColorArchive.TryGetValue(txt, out Color archivedColor) && txt.color != archivedColor)
                         txt.color = archivedColor;
 
                     if (!CustomBoardFonts) continue;
@@ -492,7 +507,8 @@ namespace iiMenu.Managers
                     if (!characterDistanceArchive.ContainsKey(txt))
                         characterDistanceArchive[txt] = txt.characterSpacing;
 
-                    txt.characterSpacing = 0f;
+                    if (txt.characterSpacing != 0f)
+                        txt.characterSpacing = 0f;
 
                     txt.SafeSetFont(activeFont);
                     txt.SafeSetFontStyle(activeFontStyle);
@@ -538,6 +554,7 @@ namespace iiMenu.Managers
 
         private static readonly HashSet<string> loggedObjectBoardFailures = new HashSet<string>();
         private static float nextBoardSurfacePass;
+        private static float nextArchivePruneTime;
 
         // Keeps every colored surface present: the game resets materials on room
         // changes, map scenes reload their objects, and map anchors can spawn after
@@ -686,6 +703,7 @@ namespace iiMenu.Managers
                     }
 
                     screenTargets.Remove(renderer);
+                    screenTargetsDirty = true;
                 }
             }
 
@@ -701,6 +719,7 @@ namespace iiMenu.Managers
             {
                 screenTargets = screenTargets.Where(entry => entry.Key != null)
                     .ToDictionary(entry => entry.Key, entry => entry.Value);
+                screenTargetsDirty = true;
 
                 List<Renderer> sceneRenderers = new List<Renderer>();
                 List<Renderer> candidates = new List<Renderer>();
@@ -800,19 +819,42 @@ namespace iiMenu.Managers
 
         private static void ForceKnownScreens()
         {
-            foreach (KeyValuePair<Renderer, ScreenTarget> entry in screenTargets.ToList())
+            // screenTargets is walked every frame, so the key list is cached and only
+            // rebuilt when the dictionary actually changes. screenTargets.ToList() here
+            // allocated a fresh List (and boxed the enumerator) twice per frame.
+            if (screenTargetsDirty)
+                RebuildScreenTargetCache();
+
+            for (int i = 0; i < screenTargetCache.Count; i++)
             {
-                Renderer renderer = entry.Key;
+                Renderer renderer = screenTargetCache[i];
+                ScreenTarget target;
+
+                if (!screenTargets.TryGetValue(renderer, out target))
+                    continue;
 
                 if (renderer == null)
                 {
-                    RemoveScreenOverlay(entry.Value);
+                    RemoveScreenOverlay(target);
                     screenTargets.Remove(renderer);
+                    screenTargetsDirty = true;
                     continue;
                 }
 
-                ApplyScreenTint(entry.Value);
+                ApplyScreenTint(target);
             }
+        }
+
+        private static readonly List<Renderer> screenTargetCache = new List<Renderer>();
+        private static bool screenTargetsDirty = true;
+
+        private static void RebuildScreenTargetCache()
+        {
+            screenTargetCache.Clear();
+            foreach (KeyValuePair<Renderer, ScreenTarget> entry in screenTargets)
+                screenTargetCache.Add(entry.Key);
+
+            screenTargetsDirty = false;
         }
 
         private static void ApplyScreenTint(ScreenTarget target)
@@ -826,11 +868,22 @@ namespace iiMenu.Managers
             {
                 RemoveScreenOverlay(target);
 
-                Material[] current = renderer.sharedMaterials;
-                bool tinted = current != null && current.Length == target.originals.Length;
+                // Renderer.sharedMaterials allocates a fresh Material[] on every read and
+                // this runs a few times per frame, so the single material case (which is
+                // the normal one) checks sharedMaterial instead and never allocates.
+                bool tinted;
+                if (target.originals.Length == 1)
+                {
+                    tinted = renderer.sharedMaterial == BoardMaterial;
+                }
+                else
+                {
+                    Material[] current = renderer.sharedMaterials;
+                    tinted = current != null && current.Length == target.originals.Length;
 
-                for (int i = 0; tinted && i < current.Length; i++)
-                    tinted = current[i] == BoardMaterial;
+                    for (int i = 0; tinted && i < current.Length; i++)
+                        tinted = current[i] == BoardMaterial;
+                }
 
                 if (tinted)
                     return;

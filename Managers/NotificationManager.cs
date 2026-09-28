@@ -146,6 +146,7 @@ namespace iiMenu.Managers
         }
 
         private float updateArraylistTimer;
+        private float updateInformationTimer;
         private void FixedUpdate()
         {
             try
@@ -194,15 +195,19 @@ namespace iiMenu.Managers
 
                 if (information.Count > 0)
                 {
-                    Color targetColor = Buttons.GetIndex("Swap GUI Colors").enabled ? buttonColors[1].GetCurrentColor() : backgroundColor.GetCurrentColor();
+                    if (Time.time > updateInformationTimer)
+                    {
+                        updateInformationTimer = Time.time + 0.25f;
+                        Color targetColor = Buttons.GetIndex("Swap GUI Colors").enabled ? buttonColors[1].GetCurrentColor() : backgroundColor.GetCurrentColor();
 
-                    List<string> statsLines = information
-                        .Select(item => $"<color=#{ColorToHex(targetColor)}>{item.Key}</color> <color=#{ColorToHex(textColors[1].GetColor(0))}>{item.Value}</color>")
-                        .OrderByDescending(item => informationText.GetPreferredValues(NoRichtextTags(item)).x)
-                        .ToList();
+                        List<string> statsLines = information
+                            .Select(item => $"<color=#{ColorToHex(targetColor)}>{item.Key}</color> <color=#{ColorToHex(textColors[1].GetColor(0))}>{item.Value}</color>")
+                            .OrderByDescending(item => informationText.GetPreferredValues(NoRichtextTags(item)).x)
+                            .ToList();
 
-                    informationText.SafeSetText(string.Join("\n", statsLines));
-                    informationText.color = Color.white;
+                        informationText.SafeSetText(string.Join("\n", statsLines));
+                        informationText.color = Color.white;
+                    }
                 }
                 else if (!informationText.text.IsNullOrEmpty())
                     informationText.SafeSetText("");

@@ -63,10 +63,12 @@ namespace iiMenu.Managers
             StartRecording(device);
         }
 
+        private System.Collections.ObjectModel.ReadOnlyCollection<Clip> audioClipsReadOnly;
+
         /// <summary>
         /// A read-only list of AudioClips currently playing
         /// </summary>
-        public IReadOnlyList<Clip> AudioClips => audioClips.AsReadOnly();
+        public IReadOnlyList<Clip> AudioClips => audioClipsReadOnly ??= audioClips.AsReadOnly();
 
         /// <summary>
         /// Gets or sets the microphone's recording status. This does not stop the pushed AudioClip from playing.
@@ -352,10 +354,23 @@ namespace iiMenu.Managers
             }
 
             float[] microphoneBuffer = new float[buffer.Length];
+            bool passthroughMuted = muteMicrophone;
+            if (!passthroughMuted)
+            {
+                foreach (Clip clip in audioClips)
+                {
+                    if (!clip.MuteMicrophone)
+                        continue;
+
+                    passthroughMuted = true;
+                    break;
+                }
+            }
+
             for (int i = 0; i < buffer.Length; i++)
             {
                 float microphoneSample = 0;
-                if (!muteMicrophone && !audioClips.Any(c => c.MuteMicrophone))
+                if (!passthroughMuted)
                 {
                     int index = (int)resample;
                     int nextIndex = index + 1;

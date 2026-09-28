@@ -3047,7 +3047,24 @@ namespace iiMenu.Menu
 
         private static Vector3? recenterPosition;
         private static Quaternion? recenterRotation;
+        private static bool recentering;
         public static void RecenterMenu()
+        {
+            if (recentering)
+                return;
+
+            recentering = true;
+            try
+            {
+            RecenterMenuInternal();
+            }
+            finally
+            {
+                recentering = false;
+            }
+        }
+
+        private static void RecenterMenuInternal()
         {
             bool isKeyboardCondition = UnityInput.Current.GetKey(KeyCode.Q) || (inTextInput && isKeyboardPc);
             if (clickGUI)
@@ -3165,15 +3182,6 @@ namespace iiMenu.Menu
 
                     if (!XRSettings.isDeviceActive)
                         PrivateUIRoom.instance.ToggleLevelVisibility(true);
-
-                    if (joystickMenu)
-                        Toggle("Joystick Menu");
-
-                    if (watchMenu)
-                        Toggle("Watch Menu");
-
-                    if (physicalMenu)
-                        Toggle("Physical Menu");
 
                     Vector3[] pcPositions = {
                         new Vector3(10f, 10f, 10f),
@@ -5640,10 +5648,12 @@ namespace iiMenu.Menu
             return !ColorUtility.TryParseHtmlString(hex, out var color) ? Color.black : color;
         }
 
+        private static readonly Regex richtextTagsRegex = new Regex("<.*?>", RegexOptions.IgnoreCase);
+        private static readonly Regex colorTagsRegex = new Regex(@"<color=.*?>|</color>", RegexOptions.IgnoreCase);
+
         public static string NoRichtextTags(string input, string replace = "")
         {
-            Regex notags = new Regex("<.*?>", RegexOptions.IgnoreCase);
-            return notags.Replace(input, replace);
+            return richtextTagsRegex.Replace(input, replace);
         }
 
         public static bool vibrantColors;
@@ -5660,8 +5670,7 @@ namespace iiMenu.Menu
 
         public static string NoColorTags(string input, string replace = "")
         {
-            Regex notags = new Regex(@"<color=.*?>|</color>", RegexOptions.IgnoreCase);
-            return notags.Replace(input, replace);
+            return colorTagsRegex.Replace(input, replace);
         }
 
         private static Gradient richtextGradientGradient = new Gradient();
