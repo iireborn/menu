@@ -107,8 +107,17 @@ namespace iiMenu.Mods
                 NotificationManager.SendNotification($"<color=grey>[</color><color=red>WARNING</color><color=grey>]</color> You are using the legacy microphone system. Modern soundboard features will not be implemented.");
             foreach (string file in files)
             {
-                string fileName = file.Replace("\\", "/")[(21 + Subdirectory.Length)..];
-                string soundName = RemoveFileExtension(fileName).Replace("_", " ");
+                // These used to be hardcoded character offsets into the full path, sized
+                // for the old "iisStupidMenu" base directory. BaseDirectory is "iiReborn"
+                // now, five characters shorter, so the offsets cut into the filename: the
+                // name lost its first five characters, and the path handed to the loader
+                // came out as "s/song.mp3" instead of "Sounds/song.mp3". The file was
+                // then never found, the clip was always null, and PlaySoundboardSound
+                // returned silently, so the button reported itself enabled while nothing
+                // played. The format was irrelevant; mp3 and wav both failed. Derive both
+                // from the path itself instead of slicing at a fixed offset.
+                string soundName = RemoveFileExtension(Path.GetFileName(file)).Replace("_", " ");
+                string relativePath = $"Sounds{Subdirectory}/{Path.GetFileName(file)}";
 
                 if (RecorderPatch.enabled)
                 {
@@ -116,16 +125,16 @@ namespace iiMenu.Mods
                     {
                         buttonText = "SoundboardSound" + soundName.Hash(),
                         overlapText = soundName,
-                        toolTip = "Instantly plays \"" + RemoveFileExtension(fileName).Replace("_", " ") + "\" locally + through mic (dual volume in Soundboard Settings)."
+                        toolTip = "Instantly plays \"" + soundName + "\" locally + through mic (dual volume in Soundboard Settings)."
                     };
                     if (OverlapAudio)
                     {
-                        buttonInfo.method = () => PlayAudio(file[14..]);
+                        buttonInfo.method = () => PlayAudio(relativePath);
                         buttonInfo.isTogglable = false;
                     }
                     else
                     {
-                        buttonInfo.method = () => PlaySoundboardSound(file[14..], buttonInfo, LoopAudio, BindMode > 0);
+                        buttonInfo.method = () => PlaySoundboardSound(relativePath, buttonInfo, LoopAudio, BindMode > 0);
                         buttonInfo.disableMethod = () => StopSoundboardSound(buttonInfo);
                     }
 
@@ -135,7 +144,7 @@ namespace iiMenu.Mods
                     if (BindMode > 0)
                     {
                         bool enabled = enabledSounds.Contains(soundName);
-                        soundButtons.Add(new ButtonInfo { buttonText = "SoundboardSound" + soundName.Hash(), overlapText = soundName, method = () => PrepareBindAudio(file[14..]), disableMethod = StopAllSounds, enabled = enabled, toolTip = "Plays \"" + RemoveFileExtension(fileName).Replace("_", " ") + "\" through your microphone." });
+                        soundButtons.Add(new ButtonInfo { buttonText = "SoundboardSound" + soundName.Hash(), overlapText = soundName, method = () => PrepareBindAudio(relativePath), disableMethod = StopAllSounds, enabled = enabled, toolTip = "Plays \"" + soundName + "\" through your microphone." });
 
                     }
                     else
@@ -143,10 +152,10 @@ namespace iiMenu.Mods
                         if (LoopAudio)
                         {
                             bool enabled = enabledSounds.Contains(soundName);
-                            soundButtons.Add(new ButtonInfo { buttonText = "SoundboardSound" + soundName.Hash(), overlapText = soundName, enableMethod = () => PlayAudio(file[14..]), disableMethod = StopAllSounds, enabled = enabled, toolTip = "Plays \"" + RemoveFileExtension(fileName).Replace("_", " ") + "\" through your microphone." });
+                            soundButtons.Add(new ButtonInfo { buttonText = "SoundboardSound" + soundName.Hash(), overlapText = soundName, enableMethod = () => PlayAudio(relativePath), disableMethod = StopAllSounds, enabled = enabled, toolTip = "Plays \"" + soundName + "\" through your microphone." });
                         }
                         else
-                            soundButtons.Add(new ButtonInfo { buttonText = "SoundboardSound" + soundName.Hash(), overlapText = RemoveFileExtension(fileName).Replace("_", " "), method = () => PlayAudio(file[14..]), isTogglable = false, toolTip = "Plays \"" + RemoveFileExtension(fileName).Replace("_", " ") + "\" through your microphone." });
+                            soundButtons.Add(new ButtonInfo { buttonText = "SoundboardSound" + soundName.Hash(), overlapText = soundName, method = () => PlayAudio(relativePath), isTogglable = false, toolTip = "Plays \"" + soundName + "\" through your microphone." });
                     }
                 }
 
