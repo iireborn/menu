@@ -107,15 +107,6 @@ namespace iiMenu.Mods
                 NotificationManager.SendNotification($"<color=grey>[</color><color=red>WARNING</color><color=grey>]</color> You are using the legacy microphone system. Modern soundboard features will not be implemented.");
             foreach (string file in files)
             {
-                // These used to be hardcoded character offsets into the full path, sized
-                // for the old "iisStupidMenu" base directory. BaseDirectory is "iiReborn"
-                // now, five characters shorter, so the offsets cut into the filename: the
-                // name lost its first five characters, and the path handed to the loader
-                // came out as "s/song.mp3" instead of "Sounds/song.mp3". The file was
-                // then never found, the clip was always null, and PlaySoundboardSound
-                // returned silently, so the button reported itself enabled while nothing
-                // played. The format was irrelevant; mp3 and wav both failed. Derive both
-                // from the path itself instead of slicing at a fixed offset.
                 string soundName = RemoveFileExtension(Path.GetFileName(file)).Replace("_", " ");
                 string relativePath = $"Sounds{Subdirectory}/{Path.GetFileName(file)}";
 

@@ -998,7 +998,7 @@ namespace iiMenu.Menu
                             int categoryIndex = 0;
                             foreach (ButtonInfo[] buttonList in Buttons.buttons)
                             {
-                                enabledMods.AddRange(buttonList.Where(v => v.enabled && (!hideSettings || !Buttons.categoryNames[categoryIndex].Contains("Settings")) && (!hideMacros || !Buttons.categoryNames[categoryIndex].Contains("Macro"))));
+                                enabledMods.AddRange(buttonList.Where(v => v.enabled && !v.hideFromArraylist && (!hideSettings || !Buttons.categoryNames[categoryIndex].Contains("Settings")) && (!hideMacros || !Buttons.categoryNames[categoryIndex].Contains("Macro"))));
                                 categoryIndex++;
                             }
                             enabledMods = enabledMods.OrderBy(v => v.overlapText ?? v.buttonText).ToList();
@@ -2961,7 +2961,7 @@ namespace iiMenu.Menu
                             int categoryIndex = 0;
                             foreach (ButtonInfo[] buttonList in Buttons.buttons)
                             {
-                                enabledMods.AddRange(buttonList.Where(v => v.enabled && (!hideSettings || !Buttons.categoryNames[categoryIndex].Contains("Settings")) && (!hideMacros || !Buttons.categoryNames[categoryIndex].Contains("Macro"))));
+                                enabledMods.AddRange(buttonList.Where(v => v.enabled && !v.hideFromArraylist && (!hideSettings || !Buttons.categoryNames[categoryIndex].Contains("Settings")) && (!hideMacros || !Buttons.categoryNames[categoryIndex].Contains("Macro"))));
                                 categoryIndex++;
                             }
                             enabledMods = enabledMods.OrderBy(v => v.buttonText).ToList();
@@ -4373,7 +4373,10 @@ namespace iiMenu.Menu
 
             if (SmoothGunPointer)
             {
-                GunPositionSmoothed = Vector3.Lerp(GunPositionSmoothed, EndPosition, Time.deltaTime * 6f);
+                GunPositionSmoothed = GunPositionSmoothed == Vector3.zero
+                    ? EndPosition
+                    : Vector3.Lerp(GunPositionSmoothed, EndPosition, Time.deltaTime * 6f);
+
                 EndPosition = GunPositionSmoothed;
             }
 

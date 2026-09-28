@@ -55,7 +55,7 @@ namespace iiMenu.Mods
 
         public static void SpawnKeyboard()
         {
-            isKeyboardPc = isOnPC || toggleButtonActive && keyboardWithToggleButton;
+            isKeyboardPc = !XRSettings.isDeviceActive || isOnPC || toggleButtonActive && keyboardWithToggleButton;
             inTextInput = true;
             keyboardInput = "";
 
@@ -651,6 +651,7 @@ namespace iiMenu.Mods
                     buttonText = $"Category{button.buttonText.Hash()}",
                     overlapText = button.buttonText,
                     enabled = !skipButtons.Contains(button.buttonText),
+                    hideFromArraylist = true,
                     enableMethod =() => skipButtons.Remove(button.buttonText),
                     disableMethod =() => skipButtons.Add(button.buttonText),
                     toolTip = "Toggles the visibility of the category " + button.buttonText + "."
@@ -1001,6 +1002,60 @@ exit 0";
 
             Buttons.GetIndex("Change Menu Button").overlapText = "Change Menu Button <color=grey>[</color><color=green>" + buttonNames[menuButtonIndex] + "</color><color=grey>]</color>";
         }
+
+        public static int gradientColor1Index = 0;
+        public static int gradientColor2Index = 2;
+
+        private static readonly Color[] gradientPresets = {
+            new Color(0f, 0.67f, 1f),
+            new Color(1f, 0.33f, 0f),
+            new Color(0f, 1f, 0.5f),
+            new Color(1f, 0f, 0.5f),
+            new Color(1f, 1f, 0f),
+            new Color(0.5f, 0f, 1f),
+            new Color(1f, 1f, 1f),
+            new Color(0f, 0f, 0f)
+        };
+
+        private static readonly string[] gradientColorNames = {
+            "Blue", "Orange", "Green", "Pink", "Yellow", "Purple", "White", "Black"
+        };
+
+        public static Color GetGradientColor1() => gradientPresets[gradientColor1Index % gradientPresets.Length];
+        public static Color GetGradientColor2() => gradientPresets[gradientColor2Index % gradientPresets.Length];
+
+        public static void ChangeGradientColor1(bool positive = true)
+        {
+            if (positive)
+                gradientColor1Index++;
+            else
+                gradientColor1Index--;
+
+            gradientColor1Index %= gradientPresets.Length;
+            if (gradientColor1Index < 0)
+                gradientColor1Index = gradientPresets.Length - 1;
+
+            ButtonInfo button = Buttons.GetIndex("Change Gradient Color 1");
+            if (button != null)
+                button.overlapText = "Change Gradient Color 1 <color=grey>[</color><color=green>" + gradientColorNames[gradientColor1Index] + "</color><color=grey>]</color>";
+        }
+
+        public static void ChangeGradientColor2(bool positive = true)
+        {
+            if (positive)
+                gradientColor2Index++;
+            else
+                gradientColor2Index--;
+
+            gradientColor2Index %= gradientPresets.Length;
+            if (gradientColor2Index < 0)
+                gradientColor2Index = gradientPresets.Length - 1;
+
+            ButtonInfo button = Buttons.GetIndex("Change Gradient Color 2");
+            if (button != null)
+                button.overlapText = "Change Gradient Color 2 <color=grey>[</color><color=green>" + gradientColorNames[gradientColor2Index] + "</color><color=grey>]</color>";
+        }
+
         public static void ChangeMenuTheme(bool increment = true)
         {
             if (increment)
@@ -4587,13 +4642,16 @@ exit 0";
                 "Default",
                 "Lightning",
                 "Wavy",
-                "Blocky",
-                "Zigzag",
                 "Spring",
                 "Bouncy",
                 "Audio",
                 "Bezier",
-                "Rope"
+                "Rope",
+                "Smooth Wobble",
+                "Pulsing",
+                "Vibrate",
+                "Plasma",
+                "Gradient"
             };
 
             if (positive)
@@ -5020,6 +5078,13 @@ exit 0";
         }
 
         public static IEnumerator DictationRecognizer()
+        {
+            NotificationManager.SendNotification("<color=grey>[</color><color=cyan>SYSTEM</color><color=grey>]</color> AI Assistant is under construction.", 4000);
+            VoiceAssistant.Hide();
+            yield break;
+        }
+
+        public static IEnumerator DictationRecognizer_REAL()
         {
             ButtonInfo mod = Buttons.GetIndex("AI Assistant");
 
@@ -5820,7 +5885,7 @@ exit 0";
                 int categoryIndex = 0;
                 foreach (ButtonInfo[] buttonList in Buttons.buttons)
                 {
-                    enabledMods.AddRange(buttonList.Where(v => v.enabled && (!hideSettings || !Buttons.categoryNames[categoryIndex].Contains("Settings")) && (!hideMacros || !Buttons.categoryNames[categoryIndex].Contains("Macro"))));
+                    enabledMods.AddRange(buttonList.Where(v => v.enabled && !v.hideFromArraylist && (!hideSettings || !Buttons.categoryNames[categoryIndex].Contains("Settings")) && (!hideMacros || !Buttons.categoryNames[categoryIndex].Contains("Macro"))));
                     categoryIndex++;
                 }
                 enabledMods = enabledMods.OrderBy(v => v.overlapText ?? v.buttonText).ToList();
@@ -5939,8 +6004,6 @@ exit 0";
                         UpdateSearch();
                 }
 
-                if (!XRSettings.isDeviceActive)
-                    return;
 
                 if (clickGuiLine == null)
                 {
@@ -5976,6 +6039,9 @@ exit 0";
 
                     uiResults.Clear();
                     uiRaycaster.Raycast(pointerData, uiResults);
+
+                    if (UI.prefabRaycaster != null)
+                        UI.prefabRaycaster.Raycast(pointerData, uiResults);
 
                     currentUI = uiResults.Count > 0 ? uiResults[0].gameObject : null;
 
@@ -6013,7 +6079,9 @@ exit 0";
                         clickGuiLine.gameObject.SetActive(true);
                 }
 
-                bool trigger = useLeft ? leftTrigger > 0.5f : rightTrigger > 0.5f;
+                bool trigger = !XRSettings.isDeviceActive
+                    ? Mouse.current != null && Mouse.current.leftButton.isPressed
+                    : useLeft ? leftTrigger > 0.5f : rightTrigger > 0.5f;
                 Vector2 currentPos = pointerData.position;
                 pointerData.delta = currentPos - lastPointerPos;
                 lastPointerPos = currentPos;
@@ -6021,6 +6089,7 @@ exit 0";
                 if (trigger && !lastTriggerClick && currentUI != null)
                 {
                     GameObject targetUI = null;
+                    TMP_InputField targetField = null;
                     foreach (var result in uiResults)
                     {
                         var button = result.gameObject.GetComponent<Button>();
@@ -6031,6 +6100,7 @@ exit 0";
                         if (button != null || toggle != null || slider != null || inputField != null)
                         {
                             targetUI = result.gameObject;
+                            targetField = inputField;
                             break;
                         }
                     }
@@ -6041,6 +6111,9 @@ exit 0";
 
                     ExecuteEvents.Execute(pressedUI, pointerData, ExecuteEvents.pointerDownHandler);
                     pointerData.pointerPress = pressedUI;
+
+                    if (targetField != null)
+                        UI.FocusControlField(targetField);
 
                     isDragging = false;
                     draggedUI = ExecuteEvents.GetEventHandler<IDragHandler>(currentUI);
@@ -6300,11 +6373,12 @@ exit 0";
             string seperator = ";;";
 
             string enabledtext = "";
+
             foreach (ButtonInfo[] buttonlist in Buttons.buttons)
             {
                 foreach (ButtonInfo v in buttonlist)
                 {
-                    if (!v.detected && v.enabled && v.buttonText != "Save Preferences")
+                    if (!v.detected && v.enabled && !v.hideFromArraylist && v.buttonText != "Save Preferences")
                     {
                         if (enabledtext == "")
                             enabledtext += v.buttonText;
@@ -6315,6 +6389,7 @@ exit 0";
             }
 
             string favoritetext = "";
+
             foreach (string fav in favorites)
             {
                 if (favoritetext == "")
@@ -6402,6 +6477,8 @@ exit 0";
                 Safety.watchdogIntervalIndex.ToString(),
                 (Safety.visualizePressRadius ? "1" : "0"),
                 Safety.micGateHoldIndex.ToString(),
+                gradientColor1Index.ToString(),
+                gradientColor2Index.ToString(),
                 PrefsFormatVersion.ToString()
             };
 
@@ -6734,6 +6811,11 @@ exit 0";
 
                     Safety.micGateHoldIndex = GetPreferenceInt(data, 77, 2) - 1;
                     Safety.ChangeMicGateHoldTime();
+
+                    if (data.Length > 78) gradientColor1Index = GetPreferenceInt(data, 78, 1);
+                    ChangeGradientColor1();
+                    if (data.Length > 79) gradientColor2Index = GetPreferenceInt(data, 79, 3);
+                    ChangeGradientColor2();
 
                     SoundboardManager.ApplySettings();
                     try

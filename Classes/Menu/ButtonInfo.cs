@@ -32,6 +32,8 @@ namespace iiMenu.Classes.Menu
         public bool incremental;
         public bool detected;
 
+        public bool hideFromArraylist;
+
         public string customBind;
         public string rebindKey;
     }

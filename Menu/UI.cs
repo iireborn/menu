@@ -12,12 +12,16 @@ using iiMenu.Classes.Menu;
 using iiMenu.Extensions;
 using iiMenu.Managers;
 using Photon.Pun;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 using UnityEngine.UI;
 using static iiMenu.Menu.Main;
 using static iiMenu.Utilities.AssetUtilities;
@@ -40,6 +44,9 @@ namespace iiMenu.Menu
             uiPrefab = LoadObject<GameObject>("UI");
 
             Transform canvas = uiPrefab.transform.Find("Canvas");
+            prefabCanvas = canvas.GetComponent<Canvas>();
+            prefabRaycaster = canvas.GetComponent<GraphicRaycaster>();
+            LogManager.Log($"UI prefab canvas: raycaster={(prefabRaycaster != null ? "present" : "MISSING")}");
             watermark = canvas.Find("Watermark").GetComponent<Image>();
             versionLabel = canvas.Find("VersionLabel").GetComponent<TextMeshProUGUI>();
             roomStatus = canvas.Find("RoomStatus").GetComponent<TextMeshProUGUI>();
@@ -55,6 +62,12 @@ namespace iiMenu.Menu
             g = canvas.Find("ControlUI/G").GetComponent<TMP_InputField>();
             b = canvas.Find("ControlUI/B").GetComponent<TMP_InputField>();
             textInput = canvas.Find("ControlUI/TextInput").GetComponent<TMP_InputField>();
+
+            WatchControlField(r, true);
+            WatchControlField(g, true);
+            WatchControlField(b, true);
+            WatchControlField(textInput, false);
+
             LogManager.Log(canvas.Find("ControlUI/QueueButton"));
             canvas.Find("ControlUI/QueueButton").GetComponent<Button>().onClick.AddListener(() =>
             {
@@ -184,6 +197,435 @@ namespace iiMenu.Menu
         private TMP_InputField b;
         private TMP_InputField textInput;
 
+        private static TMP_InputField focusedControlField;
+
+        public static Canvas prefabCanvas;
+
+        public static GraphicRaycaster prefabRaycaster;
+
+        public static void FocusControlField(TMP_InputField field)
+        {
+            if (focusedControlField == field)
+                return;
+
+            focusedControlField = field;
+            caretIndex = field.text != null ? field.text.Length : 0;
+            ClearSelection();
+            SyncSelection(field);
+        }
+
+        private static void BlurControlField()
+        {
+            TMP_InputField field = focusedControlField;
+
+            if (field != null)
+            {
+                try { field.DeactivateInputField(); }
+                catch (System.Exception) { }
+            }
+
+            focusedControlField = null;
+            ClearSelection();
+        }
+
+        private static void SyncSelection(TMP_InputField field)
+        {
+            field.caretPosition = caretIndex;
+            field.selectionStringAnchorPosition = HasSelection() ? selectionAnchor : caretIndex;
+            field.selectionStringFocusPosition = caretIndex;
+        }
+
+        private static void WatchControlField(TMP_InputField field, bool numeric)
+        {
+            if (numeric)
+                numericControlFields.Add(field);
+
+            field.onSelect.AddListener(_ => focusedControlField = field);
+            field.onDeselect.AddListener(_ =>
+            {
+                if (focusedControlField == field)
+                    focusedControlField = null;
+            });
+        }
+
+        private static readonly HashSet<TMP_InputField> numericControlFields = new HashSet<TMP_InputField>();
+
+        private static bool IsNumeric(TMP_InputField field) => numericControlFields.Contains(field);
+
+        private static int caretIndex;
+        private static int selectionAnchor = -1;
+
+        private static bool HasSelection() => selectionAnchor >= 0;
+
+        private static int SelectionStart() => Mathf.Min(caretIndex, selectionAnchor);
+
+        private static int SelectionEnd() => Mathf.Max(caretIndex, selectionAnchor);
+
+        private static void ClearSelection() => selectionAnchor = -1;
+
+        private static void ApplyValue(TMP_InputField field, string value, int caret)
+        {
+            if (IsNumeric(field))
+            {
+                if (value.Length > 3)
+                    return;
+
+                if (value.Length > 0 && int.TryParse(value, out int number) && number > 255)
+                    value = "255";
+            }
+
+            if (field.text != value)
+                field.text = value;
+
+            caretIndex = Mathf.Clamp(caret, 0, value.Length);
+            ClearSelection();
+            SyncSelection(field);
+        }
+
+        private static void DeleteSelection(TMP_InputField field)
+        {
+            if (!HasSelection())
+                return;
+
+            string value = field.text ?? "";
+            int start = SelectionStart();
+
+            ApplyValue(field, value.Substring(0, start) + value.Substring(SelectionEnd()), start);
+        }
+
+        private static void CopySelection(TMP_InputField field)
+        {
+            if (!HasSelection())
+                return;
+
+            string value = field.text ?? "";
+            string selected = value.Substring(SelectionStart(), SelectionEnd() - SelectionStart());
+            try { GUIUtility.systemCopyBuffer = selected; }
+            catch (System.Exception exception)
+            {
+                LogManager.LogError($"Could not write to the clipboard: {exception.Message}");
+            }
+        }
+
+        private static void SelectAll(TMP_InputField field)
+        {
+            string value = field.text ?? "";
+            selectionAnchor = 0;
+            caretIndex = value.Length;
+            SyncSelection(field);
+        }
+
+        private static void MoveCaret(TMP_InputField field, int direction, bool extend)
+        {
+            string value = field.text ?? "";
+
+            if (extend)
+            {
+                if (!HasSelection())
+                    selectionAnchor = Mathf.Clamp(caretIndex, 0, value.Length);
+            }
+            else
+            {
+                ClearSelection();
+            }
+
+            caretIndex = Mathf.Clamp(caretIndex + direction, 0, value.Length);
+            SyncSelection(field);
+        }
+
+        private static readonly (Key key, string plain, string shifted)[] textKeys =
+        {
+            (Key.A, "a", "A"), (Key.B, "b", "B"), (Key.C, "c", "C"), (Key.D, "d", "D"),
+            (Key.E, "e", "E"), (Key.F, "f", "F"), (Key.G, "g", "G"), (Key.H, "h", "H"),
+            (Key.I, "i", "I"), (Key.J, "j", "J"), (Key.K, "k", "K"), (Key.L, "l", "L"),
+            (Key.M, "m", "M"), (Key.N, "n", "N"), (Key.O, "o", "O"), (Key.P, "p", "P"),
+            (Key.Q, "q", "Q"), (Key.R, "r", "R"), (Key.S, "s", "S"), (Key.T, "t", "T"),
+            (Key.U, "u", "U"), (Key.V, "v", "V"), (Key.W, "w", "W"), (Key.X, "x", "X"),
+            (Key.Y, "y", "Y"), (Key.Z, "z", "Z"),
+
+            (Key.Digit1, "1", "!"), (Key.Digit2, "2", "\""), (Key.Digit3, "3", "#"), (Key.Digit4, "4", "$"),
+            (Key.Digit5, "5", "%"), (Key.Digit6, "6", "&"), (Key.Digit7, "7", "'"), (Key.Digit8, "8", "("),
+            (Key.Digit9, "9", ")"), (Key.Digit0, "0", ")"),
+
+            (Key.Space, " ", " "), (Key.Period, ".", ">"), (Key.Comma, ",", "<"),
+            (Key.Slash, "/", "?"), (Key.Semicolon, ";", ":"), (Key.Quote, "'", "\""),
+            (Key.Minus, "-", "_"), (Key.Equals, "=", "+"), (Key.LeftBracket, "[", "{"),
+            (Key.RightBracket, "]", "}"), (Key.Backslash, "\\", "|"), (Key.Backquote, "`", "~")
+        };
+
+        private const float repeatDelay = 0.35f;
+        private const float repeatInterval = 0.05f;
+
+        private static Key heldKey = Key.None;
+        private static string heldText;
+        private static float nextRepeatTime;
+
+        private static void InsertText(TMP_InputField field, string text)
+        {
+            string value = field.text ?? "";
+            int start = HasSelection() ? SelectionStart() : Mathf.Clamp(caretIndex, 0, value.Length);
+            int end = HasSelection() ? SelectionEnd() : start;
+
+            ApplyValue(field, value.Substring(0, start) + text + value.Substring(end), start + text.Length);
+        }
+
+        private static bool capsLockActive;
+        private static bool capsLockSeen;
+
+        private static bool ReadCapsLock(Keyboard keyboard)
+        {
+            if (!capsLockSeen)
+            {
+                capsLockActive = keyboard.capsLockKey.isPressed;
+                capsLockSeen = true;
+            }
+            else if (keyboard.capsLockKey.wasPressedThisFrame)
+            {
+                capsLockActive = !capsLockActive;
+            }
+
+            return capsLockActive;
+        }
+
+        private static void UpdateTypedText(Keyboard keyboard, bool shift)        {
+            TMP_InputField field = focusedControlField;
+
+            bool caps = ReadCapsLock(keyboard);
+
+            foreach ((Key key, string plain, string shifted) in textKeys)
+            {
+                KeyControl control = keyboard[key];
+
+                if (control.wasPressedThisFrame)
+                {
+                    bool numeric = IsNumeric(field);
+                    string text;
+
+                    if (numeric)
+                    {
+                        text = plain;
+                    }
+                    else if (char.IsLetter(plain[0]))
+                    {
+                        text = shift ^ caps ? shifted : plain;
+                    }
+                    else
+                    {
+                        text = shift ? shifted : plain;
+                    }
+
+                    if (numeric && !char.IsDigit(text[0]))
+                        continue;
+
+                    InsertText(field, text);
+                    heldKey = key;
+                    heldText = text;
+                    nextRepeatTime = Time.time + repeatDelay;
+                }
+                else if (control.isPressed && key == heldKey && heldText != null && Time.time >= nextRepeatTime)
+                {
+                    if (IsNumeric(field) && !char.IsDigit(heldText[0]))
+                    {
+                        heldKey = Key.None;
+                        heldText = null;
+                        return;
+                    }
+
+                    InsertText(field, heldText);
+                    nextRepeatTime = Time.time + repeatInterval;
+                }
+                else if (!control.isPressed && key == heldKey)
+                {
+                    heldKey = Key.None;
+                    heldText = null;
+                }
+            }
+        }
+
+        private static void UpdateControlField()
+        {
+            TMP_InputField field = focusedControlField;
+
+            if (field == null || inTextInput || Instance == null || !Instance.isOpen)
+                return;
+
+            Keyboard keyboard = Keyboard.current;
+
+            if (keyboard == null)
+                return;
+
+            bool control = keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed;
+            bool shift = keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed;
+
+            if (control)
+            {
+                if (keyboard.aKey.wasPressedThisFrame)
+                {
+                    SelectAll(field);
+                    return;
+                }
+
+                if (keyboard.cKey.wasPressedThisFrame)
+                {
+                    CopySelection(field);
+                    return;
+                }
+
+                if (keyboard.xKey.wasPressedThisFrame)
+                {
+                    CopySelection(field);
+                    DeleteSelection(field);
+                    return;
+                }
+
+                if (keyboard.vKey.wasPressedThisFrame)
+                {
+                    string clipboard = null;
+
+                    try { clipboard = GUIUtility.systemCopyBuffer; }
+                    catch (System.Exception exception)
+                    {
+                        LogManager.LogError($"Could not read the clipboard: {exception.Message}");
+                    }
+
+                    if (!string.IsNullOrEmpty(clipboard))
+                    {
+                        if (IsNumeric(field))
+                            clipboard = new string(clipboard.Where(char.IsDigit).ToArray());
+
+                        if (clipboard.Length > 0)
+                            InsertText(field, clipboard);
+                    }
+
+                    return;
+                }
+                return;
+            }
+
+            UpdateTypedText(keyboard, shift);
+
+            RepeatKey(keyboard.backspaceKey, () => Backspace(field));
+            RepeatKey(keyboard.deleteKey, () => DeleteForward(field));
+            RepeatKey(keyboard.leftArrowKey, () => MoveCaret(field, -1, shift));
+            RepeatKey(keyboard.rightArrowKey, () => MoveCaret(field, 1, shift));
+
+            if (keyboard.homeKey.wasPressedThisFrame)
+            {
+                MoveCaretTo(field, 0, shift);
+                return;
+            }
+
+            if (keyboard.endKey.wasPressedThisFrame)
+                MoveCaretTo(field, (field.text ?? "").Length, shift);
+        }
+
+        private static void RepeatKey(KeyControl key, Action action)
+        {
+            if (key.wasPressedThisFrame)
+            {
+                action();
+                nextEditRepeat = Time.time + repeatDelay;
+            }
+            else if (key.isPressed && Time.time >= nextEditRepeat)
+            {
+                action();
+                nextEditRepeat = Time.time + repeatInterval;
+            }
+        }
+
+        private static float nextEditRepeat;
+
+        private static void Backspace(TMP_InputField field)
+        {
+            if (HasSelection())
+            {
+                DeleteSelection(field);
+                return;
+            }
+
+            string value = field.text ?? "";
+            int caret = Mathf.Clamp(caretIndex, 0, value.Length);
+
+            if (caret > 0)
+                ApplyValue(field, value.Remove(caret - 1, 1), caret - 1);
+        }
+
+        private static void DeleteForward(TMP_InputField field)
+        {
+            if (HasSelection())
+            {
+                DeleteSelection(field);
+                return;
+            }
+
+            string value = field.text ?? "";
+            int caret = Mathf.Clamp(caretIndex, 0, value.Length);
+
+            if (caret < value.Length)
+                ApplyValue(field, value.Remove(caret, 1), caret);
+        }
+
+        private static void MoveCaretTo(TMP_InputField field, int position, bool extend)
+        {
+            if (extend)
+            {
+                if (!HasSelection())
+                    selectionAnchor = Mathf.Clamp(caretIndex, 0, (field.text ?? "").Length);
+            }
+            else
+            {
+                ClearSelection();
+            }
+
+            caretIndex = Mathf.Clamp(position, 0, (field.text ?? "").Length);
+            SyncSelection(field);
+        }
+
+        private void LateUpdate()
+        {
+            UpdateControlField();
+        }
+        private static void UpdateControlUiPointer()
+        {
+            if (prefabRaycaster == null || Instance == null || !Instance.isOpen)
+                return;
+
+            try
+            {
+                if (Mouse.current == null || !Mouse.current.leftButton.wasPressedThisFrame)
+                    return;
+
+                var pointer = new PointerEventData(UnityEngine.EventSystems.EventSystem.current)
+                {
+                    position = Mouse.current.position.ReadValue()
+                };
+
+                controlHits.Clear();
+                prefabRaycaster.Raycast(pointer, controlHits);
+
+                for (int i = 0; i < controlHits.Count; i++)
+                {
+                    TMP_InputField field = controlHits[i].gameObject.GetComponent<TMP_InputField>()
+                        ?? controlHits[i].gameObject.GetComponentInParent<TMP_InputField>();
+
+                    if (field != null)
+                    {
+                        FocusControlField(field);
+                        return;
+                    }
+                }
+
+                if (focusedControlField != null)
+                    BlurControlField();
+            }
+            catch (System.Exception exception)
+            {
+                LogManager.LogError($"Control UI pointer handling failed: {exception.Message}");
+            }
+        }
+
+        private static readonly List<RaycastResult> controlHits = new List<RaycastResult>();
+
         private Image controlBackground;
         private List<TextMeshProUGUI> textObjects;
         private List<Image> imageObjects = new List<Image>();
@@ -193,6 +635,8 @@ namespace iiMenu.Menu
 
         private void Update()
         {
+            UpdateControlUiPointer();
+
             if (Time.time >= legacyPanelCheckTime)
             {
                 legacyPanelCheckTime = Time.time + 1f;
@@ -320,7 +764,7 @@ namespace iiMenu.Menu
                     {
                         try
                         {
-                            if (!button.enabled || (hideSettings && (!hideSettings ||
+                            if (!button.enabled || button.hideFromArraylist || (hideSettings && (!hideSettings ||
                                                                      Buttons.categoryNames[categoryIndex]
                                                                          .Contains("Settings")))) continue;
                             string buttonText = button.overlapText ?? button.buttonText;
